@@ -10,11 +10,19 @@ import logging
 class VideoStreamTrack(MediaStreamTrack):
     kind = "video"
     
-    def __init__(self, device_id=None):
+    def __init__(self, device_id=None, camera_id=1):  # Changed default to camera 1
         super().__init__()
         self.device_id = device_id
+        self.camera_id = camera_id
         self.pts = 0
-        self.cap = None
+        self.cap = cv2.VideoCapture(camera_id)
+        if not self.cap.isOpened():
+            raise RuntimeError(f"Could not open camera {camera_id}")
+        
+        # Set camera properties
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
 
         self.model = YOLO("yolov8n-face.pt")
         logging.info("YOLO face detection model loaded successfully")
