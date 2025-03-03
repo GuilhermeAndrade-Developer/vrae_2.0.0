@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VRAE - Streaming</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f4f4f4;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        #video {
+            width: 640px;
+            height: 480px;
+            border: 2px solid #333;
+            background-color: #eee;
+            display: block;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        #messages {
+            margin-top: 10px;
+            color: #333;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+<h1>VRAE - Video Streaming</h1>
+
+<!-- Add device selector -->
+<div style="margin-bottom: 20px;">
+    <select id="deviceSelect" style="padding: 8px; font-size: 14px; margin-right: 10px;">
+        <option value="0">Webcam Integrada</option>
+    </select>
+    <button id="refreshDevices">Atualizar Dispositivos</button>
+</div>
+
+<video id="video" autoplay playsinline
+       style="width: 640px; height: 480px; background-color: #eee; border: 2px solid #333;"></video>
+<button id="startButton">Iniciar Stream</button>
+<button id="stopButton" disabled>Parar Stream</button>
+<p id="messages"></p>
+
+<script>
+let pc;
+const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MX0.x1kR_SR47XEBZmB9FT6g2Ss-H8XJtg5sEkiankLMsoM';
+
+// Add function to fetch and list devices
+async function loadDevices() {
+    try {
+        // Get registered devices from backend
+        const response = await fetch('http://localhost:5000/devices', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const devices = await response.json();
+
+        // Get integrated webcams
+        const mediaDevices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = mediaDevices.filter(device => device.kind === 'videoinput');
+
+        const deviceSelect = document.getElementById('deviceSelect');
+        deviceSelect.innerHTML = ''; // Clear existing options
+
+        // Add integrated webcams
+        videoDevices.forEach(device => {
+            const option = document.createElement('option');
+            option.value = `local:${device.deviceId}`;
+            option.text = device.label || `Webcam ${device.deviceId}`;
+            deviceSelect.appendChild(option);
+        });
+
+        // Add registered IP cameras
+        devices.forEach(device => {
+            const option = document.createElement('option');
+            option.value = `ip:${device.id}`;
+            option.text = `${device.name} (${device.ip})`;
+            deviceSelect.appendChild(option);
+        });
+    } catch (e) {
+        console.error('Error loading devices:', e);
+        document.getElementById('messages').textContent = 'Erro ao carregar dispositivos';
+    }
+}
+
+// Modify startStreaming to handle different device types
+async function startStreaming(deviceValue) {
+    const [type, id] = deviceValue.split(':');
+    console.log(`Starting stream for ${type} device: ${id}`);
+    
+    document.getElementById('startButton').disabled = true;
+    document.getElementById('stopButton').disabled = false;
+    const video = document.getElementById('video');
+    const messages = document.getElementById('messages');
+    messages.textContent = "Iniciando conexão...";
+
+    try {
+        pc = new RTCPeerConnection({
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" }
+            ]
+        });
+
+        pc.ontrack = (event) => {
+            if (event.track.kind === 'video') {
+                const videoElement = document.getElementById('video');
+                videoElement.srcObject = event.streams[0];
+                videoElement.play().catch(console.error);
+            }
+        };
+
+        // Create offer
+        const offer = await pc.createOffer({
+            offerToReceiveVideo: true
+        });
+        await pc.setLocalDescription(offer);
+
+        // Send offer to server with device_id
+        const response = await fetch('http://localhost:5000/offer', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                sdp: offer.sdp,
+                type: offer.type,
+                device_id: id
+            })
+        });
+
+        const answerData = await response.json();
+        await pc.setRemoteDescription(new RTCSessionDescription(answerData));
+
+    } catch (e) {
+        console.error("Erro na conexão WebRTC:", e);
+        messages.textContent = "Erro ao conectar. Tentando novamente...";
+        setTimeout(() => startStreaming(deviceValue), 5000);
+    }
+}
+
+// Add event listeners
+document.getElementById('refreshDevices').onclick = loadDevices;
+
+// Load devices when page loads
+document.addEventListener('DOMContentLoaded', loadDevices);
+
+// Start streaming from specific device
+document.getElementById('startButton').onclick = () => {
+    const deviceId = document.getElementById('deviceSelect').value;
+    startStreaming(deviceId);
+};
+
+document.getElementById('stopButton').onclick = () => {
+    if (pc) {
+        pc.close();
+        document.getElementById('video').srcObject = null;
+        document.getElementById('startButton').disabled = false;
+        document.getElementById('stopButton').disabled = true;
+        document.getElementById('messages').textContent = 'Stream parada';
+    }
+};
+</script>
+</body>
+</html>
