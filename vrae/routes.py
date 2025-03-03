@@ -7,8 +7,13 @@ import logging
 from .models import User, LoginLog, Device
 from .stream import StreamManager  # Import StreamManager first
 from .webrtc_stream import VideoStreamTrack
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
 from .camera_manager import CameraManager
+
+# Define RTCConfiguration no início do arquivo, após os imports
+rtc_configuration = RTCConfiguration([
+    RTCIceServer(urls=["stun:stun.l.google.com:19302"])
+])
 
 # Create StreamManager instance after import
 stream_manager = StreamManager()
@@ -165,43 +170,35 @@ pcs = set()
 @app.route('/offer', methods=['POST'])
 @token_required
 async def offer(current_user):
-    """WebRTC offer route"""
     try:
         params = await request.get_json()
         offer = RTCSessionDescription(
             sdp=params["sdp"],
             type=params["type"]
         )
-        
-        # Get device_id from request
-        device_id = params.get("device_id")
-        
-        if device_id:
-            # Verify if device exists and user has access
-            device = await Device.get(device_id)
-            if not device:
-                return jsonify({'error': 'Device not found'}), 404
 
-        pc = RTCPeerConnection()
+        # Use rtc_configuration ao invés de RTCConfiguration
+        pc = RTCPeerConnection(configuration=rtc_configuration)
         pcs.add(pc)
-        
-        @pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            app.logger.info(f"Connection state is {pc.connectionState}")
-            if pc.connectionState == "failed":
-                await pc.close()
-                pcs.discard(pc)
 
-        # Add video track with specific device
-        video = VideoStreamTrack(device_id)
+        try:
+            # Tente primeiro a câmera 1 (que funcionou no teste)
+            video = VideoStreamTrack(camera_id=1)
+        except Exception as e:
+            app.logger.warning(f"Failed to open camera 1: {str(e)}")
+            try:
+                # Fallback para câmera 0
+                video = VideoStreamTrack(camera_id=0)
+            except Exception as e:
+                app.logger.error(f"Failed to open any camera: {str(e)}")
+                return jsonify({"error": "Could not initialize camera"}), 500
+
         pc.addTrack(video)
 
-        # Handle the offer
         await pc.setRemoteDescription(offer)
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
-        app.logger.info(f"WebRTC connection established for device {device_id}")
         return jsonify({
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type
@@ -209,7 +206,7 @@ async def offer(current_user):
 
     except Exception as e:
         app.logger.error(f"Error in WebRTC connection: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/devices', methods=['GET'])

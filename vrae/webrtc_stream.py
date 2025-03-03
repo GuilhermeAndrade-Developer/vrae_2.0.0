@@ -6,6 +6,7 @@ from aiortc import MediaStreamTrack
 from av import VideoFrame
 from ultralytics import YOLO
 import logging
+import platform
 
 class VideoStreamTrack(MediaStreamTrack):
     kind = "video"
@@ -15,14 +16,34 @@ class VideoStreamTrack(MediaStreamTrack):
         self.device_id = device_id
         self.camera_id = camera_id
         self.pts = 0
-        self.cap = cv2.VideoCapture(camera_id)
-        if not self.cap.isOpened():
-            raise RuntimeError(f"Could not open camera {camera_id}")
+        self.system = platform.system()
         
-        # Set camera properties
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        try:
+            if self.system == "Windows":
+                self.cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
+            else:  # macOS or Linux
+                self.cap = cv2.VideoCapture(camera_id)
+            
+            if not self.cap.isOpened():
+                raise RuntimeError(f"Could not open camera {camera_id}")
+            
+            # Configure camera properties
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.cap.set(cv2.CAP_PROP_FPS, 30)
+            
+            # Verify if settings were applied
+            actual_width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+            actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
+            
+            logging.info(f"Camera initialized: {camera_id}")
+            logging.info(f"Resolution: {actual_width}x{actual_height}")
+            logging.info(f"FPS: {actual_fps}")
+            
+        except Exception as e:
+            logging.error(f"Error initializing camera {camera_id}: {str(e)}")
+            raise RuntimeError(f"Could not initialize camera {camera_id}: {str(e)}")
 
         self.model = YOLO("yolov8n-face.pt")
         logging.info("YOLO face detection model loaded successfully")
@@ -70,7 +91,8 @@ class VideoStreamTrack(MediaStreamTrack):
         try:
             ret, frame = self.cap.read()
             if not ret:
-                return None
+                logging.error(f"Failed to capture frame from camera {self.camera_id}")
+                raise RuntimeError("Failed to capture frame")
 
             # YOLO detection - usando modelo padrão
             results = self.model(frame, verbose=False)
@@ -97,3 +119,7 @@ class VideoStreamTrack(MediaStreamTrack):
         if self.cap:
             self.cap.release()
         super().stop()
+        
+    def __del__(self):
+        if hasattr(self, 'cap'):
+            self.cap.release()
