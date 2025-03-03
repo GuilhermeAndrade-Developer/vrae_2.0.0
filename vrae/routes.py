@@ -60,42 +60,41 @@ def token_required(f):
 
 
 @app.route('/login', methods=['POST'])
-def login():
-    app.logger.info("Entering /login route")  # Alterado aqui
-    auth = request.get_json()
-    app.logger.debug(f"Received login request: {auth}")  # Alterado aqui
-
-    if (not auth or not auth['username'] or not auth['password']):
-        app.logger.warning("Authentication data is missing!")  # Alterado aqui
-        return jsonify({'message': 'Erro de autenticação!'}), 401
-
-    user = User.get_by_username(auth['username'])
-    if (user):
-        app.logger.debug(f"User found: {user.username}")  # Alterado aqui
-    else:
-        app.logger.warning(f"User not found with username: {auth['username']}")  # Alterado aqui
-
-    if (not user or not user.check_password(auth['password'])):
-        app.logger.warning("Authentication failed!")  # Alterado aqui
-        return jsonify({'message': 'Erro de autenticação!'}), 401
-
-    # Gerar o token
-    token = jwt.encode({
-        'id': user.id
-    }, app.config['SECRET_KEY'], algorithm='HS256')
-    app.logger.debug(f"Token generated for user {user.username}: {token}")  # Alterado aqui
-
-    # Inserir o login na tabela login_logs
+async def login():
+    app.logger.info("Entering /login route")
     try:
-        LoginLog.add_log(user.id, token)
+        auth = await request.get_json()
+        app.logger.debug(f"Received login request: {auth}")
 
-    except mysql.connector.Error as err:
-        app.logger.error(f"Error saving login data: {err}")  # Alterado aqui
-        return jsonify({'message': 'Erro ao registrar o login!'}), 500
+        if not auth or not auth.get('username') or not auth.get('password'):
+            return jsonify({'message': 'Dados inválidos!'}), 401
 
-    # Login com sucesso
-    response = jsonify({'token': token})
-    return log_request(response)
+        user = await User.get_by_username(auth['username'])
+        if not user:
+            return jsonify({'message': 'Usuário não encontrado!'}), 401
+
+        if not user.check_password(auth['password']):
+            return jsonify({'message': 'Senha incorreta!'}), 401
+
+        # Gerar o token
+        token = jwt.encode({
+            'id': user.id,  # Agora user.id existe
+            'username': user.username
+        }, app.config['SECRET_KEY'], algorithm='HS256')
+        
+        app.logger.debug(f"Token generated for user {user.username}: {token}")
+
+        # Registrar o login
+        await LoginLog.add_log(user.id, token)  # Tornar add_log async também
+
+        return jsonify({
+            'token': token,
+            'message': 'Login realizado com sucesso!'
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Error in login route: {str(e)}")
+        return jsonify({'message': 'Erro interno!'}), 500
 
 
 @app.route('/protected', methods=['POST'])
@@ -111,40 +110,31 @@ def protected_route(current_user):
 
 
 @app.route('/register', methods=['POST'])
-def register():
-    app.logger.info("Entering /register route")  # Alterado aqui
-    auth = request.get_json()
-    app.logger.debug(f"Received register request: {auth}")  # Alterado aqui
-
-    if (not auth or not auth['username'] or not auth['password']):
-        app.logger.warning("Register data is missing!")  # Alterado aqui
-        return log_request(jsonify({'message': 'Erro de dados!'})), 401
-
-    # Test Database Connection
+async def register():
+    app.logger.info("Entering /register route")
     try:
-        mydb = mysql.connector.connect(
-            host=Config.MYSQL_HOST,
-            user=Config.MYSQL_USER,
-            password=Config.MYSQL_PASSWORD,
-            database=Config.MYSQL_DB
-        )
-        mydb.close()
-        app.logger.debug("Database connection test successful")  # Alterado aqui
-    except mysql.connector.Error as err:
-        app.logger.error(f"Database connection error: {err}")  # Alterado aqui
-        return log_request(jsonify({'message': 'Database connection error'})), 500
+        auth = await request.get_json()
+        app.logger.debug(f"Received register request: {auth}")
 
-    result = User.add_user(auth['username'], auth['password'])
-    if (result):
-        app.logger.debug(f"User registered with username: {auth['username']}")  # Alterado aqui
-    else:
-        app.logger.warning(f"Error registering user with username: {auth['username']}")  # Alterado aqui
+        if not auth or not auth.get('username') or not auth.get('password'):
+            app.logger.warning("Register data is missing!")
+            return jsonify({'message': 'Erro de dados!'}), 401
 
-    if (not result):
-        return log_request(jsonify({'message': 'Erro ao adicionar!'})), 401
+        # Verificar se usuário já existe
+        existing_user = await User.get_by_username(auth['username'])
+        if existing_user:
+            app.logger.warning(f"User {auth['username']} already exists")
+            return jsonify({'message': 'Usuário já existe!'}), 409
 
-    response = jsonify({'message': 'Usuário adicionado com sucesso!'})
-    return log_request(response)
+        result = await User.add_user(auth['username'], auth['password'])
+        if result:
+            return jsonify({'message': 'Usuário registrado com sucesso!'}), 201
+        else:
+            return jsonify({'message': 'Erro ao adicionar!'}), 401
+
+    except Exception as e:
+        app.logger.error(f"Error in register route: {str(e)}")
+        return jsonify({'message': 'Erro interno!'}), 500
 
 
 @app.route('/streaming')

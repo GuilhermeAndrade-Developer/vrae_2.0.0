@@ -6,10 +6,11 @@ from datetime import datetime
 
 
 class User(AuthUser):
-    def __init__(self, auth_id: str, username: str, password_hash: str = None):
+    def __init__(self, auth_id: str, username: str, password_hash: str = None, id: int = None):
         super().__init__(auth_id)
         self.username = username
         self.password_hash = password_hash
+        self.id = id  # Adicionando o id
 
     def check_password(self, password: str) -> bool:
         return check_password_hash(self.password_hash, password) if self.password_hash else False
@@ -32,34 +33,28 @@ class User(AuthUser):
             query = "SELECT id, username, password_hash FROM users WHERE username = %s"
             result = await execute_query(query, (username,))
             
-            if result and result[0]:
+            if result and len(result) > 0:
                 user_data = result[0]
-                return User(user_data[0], user_data[1], user_data[2])
+                return User(
+                    auth_id=str(user_data[0]),  # Convertendo id para string para auth_id
+                    username=user_data[1],
+                    password_hash=user_data[2],
+                    id=user_data[0]  # Adicionando o id aqui
+                )
             return None
         except Exception as e:
-            logging.error(f"Error fetching user by username: {e}")
+            logging.error(f"Error getting user by username: {e}")
             return None
 
     @staticmethod
-    def add_user(username, password):
+    async def add_user(username, password):  # Adicionar async aqui
         try:
-            mydb = mysql.connector.connect(
-                host=Config.MYSQL_HOST,
-                user=Config.MYSQL_USER,
-                password=Config.MYSQL_PASSWORD,
-                database=Config.MYSQL_DB
-            )
-            mycursor = mydb.cursor()
-
-            sql = "INSERT INTO users (username, password_hash) VALUES (%s, %s)"
-            val = (username, generate_password_hash(password))
-            mycursor.execute(sql, val)
-            mydb.commit()
-            mydb.close()
-            return True
+            query = "INSERT INTO users (username, password_hash) VALUES (%s, %s)"
+            params = (username, generate_password_hash(password))
+            result = await execute_query(query, params)  # Usar execute_query async
+            return bool(result)
         except Exception as e:
-            mydb.close()
-            print(e)
+            logging.error(f"Error adding user: {e}")
             return False
 
     @staticmethod
@@ -95,22 +90,14 @@ class User(AuthUser):
 
 class LoginLog:
     @staticmethod
-    def add_log(user_id, token):
-        mydb = mysql.connector.connect(
-            host=Config.MYSQL_HOST,
-            user=Config.MYSQL_USER,
-            password=Config.MYSQL_PASSWORD,
-            database=Config.MYSQL_DB
-        )
-        mycursor = mydb.cursor()
-
-        query = """
-            INSERT INTO login_logs (user_id, token) 
-            VALUES (%s, %s)
-        """
-        mycursor.execute(query, (user_id, token))
-        mydb.commit()
-        mydb.close()
+    async def add_log(user_id, token):  # Tornar método async
+        try:
+            query = "INSERT INTO login_logs (user_id, token) VALUES (%s, %s)"
+            await execute_query(query, (user_id, token))  # Usar execute_query async
+            return True
+        except Exception as e:
+            logging.error(f"Error adding login log: {e}")
+            return False
 
 
 class Device:
