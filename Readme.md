@@ -3,23 +3,18 @@
 - Python 3.12.4
 - pip 25.0.1
 
-## Instalação:
+## Instalação (Windows):
 
-1. Instalar Homebrew (se não estiver instalado):
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-2. Criar e ativar ambiente virtual:
+1. Criar e ativar ambiente virtual:
 ```bash
 # Criar ambiente virtual
-python3 -m venv .venv
+python -m venv .venv
 
 # Ativar ambiente virtual
-source .venv/bin/activate
+.venv\Scripts\activate
 
 # Atualizar pip
-pip install --upgrade pip
+python -m pip install --upgrade pip
 
 # Instalar dependências
 pip install -r requirements.txt
@@ -27,7 +22,7 @@ pip install -r requirements.txt
 
 ## Criar tabelas:
 ```bash
-python3 init_database.py
+python init_database.py
 ```
 
 ## Iniciar Aplicação:
