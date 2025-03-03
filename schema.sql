@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY username (username)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS login_logs (
     id INT NOT NULL AUTO_INCREMENT,
@@ -27,4 +27,4 @@ CREATE TABLE IF NOT EXISTS login_logs (
     KEY user_id (user_id),
     CONSTRAINT login_logs_ibfk_1 FOREIGN KEY (user_id) 
     REFERENCES users (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB;
