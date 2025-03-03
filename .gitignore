@@ -2,3 +2,7 @@
 
 # Model files
 *.pt
+
+# Log files
+logs/
+*.log
