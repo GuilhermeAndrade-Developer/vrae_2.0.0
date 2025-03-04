@@ -1,0 +1,12 @@
+{
+    "ip": "192.168.100.18",
+    "username": "admin",
+    "password": "teltex@4679$",
+    "rtsp_url": "rtsp://admin:teltex%404679%24@192.168.100.18:554/ONVIF/MediaInput?profile=2_def_profile6",
+    "last_tested": "2025-03-03T21:52:12.234327",
+    "profiles": {
+        "high": "rtsp://admin:teltex%404679%24@192.168.100.18:554/ONVIF/MediaInput?profile=2_def_profile6",
+        "medium": "rtsp://admin:teltex%404679%24@192.168.100.18:554/ONVIF/MediaInput?profile=2_def_profile5",
+        "low": "rtsp://admin:teltex%404679%24@192.168.100.18:554/ONVIF/MediaInput?profile=2_def_profile4"
+    }
+}

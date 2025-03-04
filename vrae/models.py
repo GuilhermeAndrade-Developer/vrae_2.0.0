@@ -1,6 +1,6 @@
 from quart_auth import AuthUser
 from werkzeug.security import generate_password_hash, check_password_hash
-from .db import execute_query
+from .db import Database  # Changed from ..db to .db
 import logging
 from datetime import datetime
 
@@ -19,7 +19,7 @@ class User(AuthUser):
     async def get(user_id: int):
         try:
             query = "SELECT id, username, password_hash FROM users WHERE id = %s"
-            result = await execute_query(query, (user_id,))
+            result = await Database.execute_query(query, (user_id,))
             if result and result[0]:
                 return User(str(result[0][0]), result[0][1], result[0][2])
             return None
@@ -31,7 +31,7 @@ class User(AuthUser):
     async def get_by_username(username):
         try:
             query = "SELECT id, username, password_hash FROM users WHERE username = %s"
-            result = await execute_query(query, (username,))
+            result = await Database.execute_query(query, (username,))
             
             if result and len(result) > 0:
                 user_data = result[0]
@@ -111,40 +111,109 @@ class Device:
         self.password = password
         self.created_at = created_at
 
-    @staticmethod
-    async def add_device(name, protocol, ip, model=None, username=None, password=None):
+    @classmethod
+    async def add_device(cls, data):
         try:
+            protocol = data.get('protocol')
+            ip = data.get('ip')
+            
+            if not protocol or not ip:
+                raise ValueError("Protocol and IP are required fields")
+            
             query = """
-                INSERT INTO devices (name, protocol, ip, model, username, password)
-                VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO devices 
+            (name, protocol, ip, username, password, type, status, rtsp_url, vendor, stream_path, user_id) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            params = (name, protocol, ip, model, username, password)
-            result = await execute_query(query, params)
-            return bool(result)
+            values = (
+                data.get('name'),
+                protocol,
+                ip,
+                data.get('username'),
+                data.get('password'),
+                data.get('type'),
+                data.get('status'),
+                data.get('rtsp_url'),
+                data.get('vendor'),
+                data.get('stream_path'),
+                data.get('user_id')
+            )
+            
+            device_id = await Database.execute_query(query, values)
+            return {
+                'success': True,
+                'message': 'Device added successfully',
+                'device_id': device_id
+            }
+                
         except Exception as e:
-            app.logger.error(f"Error adding device: {e}")
-            return False
+            logging.error(f"Error adding device: {str(e)}", exc_info=True)
+            raise
 
     @staticmethod
-    async def get_devices():
+    async def get_devices(user_id=None):
         try:
-            query = "SELECT id, name, protocol, ip, model, username, password, created_at FROM devices"
-            result = await execute_query(query)
+            query = """
+                SELECT id, name, protocol, ip, type, username, password, 
+                       status, rtsp_url, vendor, stream_path, created_at 
+                FROM devices 
+                WHERE user_id = %s
+            """
+            result = await Database.execute_query(query, (user_id,))
             
             devices = []
             for row in result:
-                device = Device(
-                    id=row[0],
-                    name=row[1],
-                    protocol=row[2],
-                    ip=row[3],
-                    model=row[4],
-                    username=row[5],
-                    password=row[6],
-                    created_at=row[7]
-                )
+                device = {
+                    'id': row[0],
+                    'name': row[1],
+                    'protocol': row[2],
+                    'ip': row[3],
+                    'type': row[4],
+                    'username': row[5],
+                    'password': row[6],
+                    'status': row[7],
+                    'rtsp_url': row[8],
+                    'vendor': row[9],
+                    'stream_path': row[10],
+                    'created_at': row[11].isoformat() if row[11] else None
+                }
                 devices.append(device)
+                
             return devices
+                
         except Exception as e:
-            app.logger.error(f"Error getting devices: {e}")
-            return []
+            logging.error(f"Error getting devices: {str(e)}", exc_info=True)
+            raise
+
+    @staticmethod
+    async def get_device(device_id):
+        try:
+            query = """
+                SELECT id, name, protocol, ip, type, username, password, 
+                       status, rtsp_url, vendor, stream_path, created_at 
+                FROM devices 
+                WHERE id = %s
+            """
+            result = await Database.execute_query(query, (device_id,))
+            
+            if result and len(result) > 0:
+                row = result[0]
+                return {
+                    'id': row[0],
+                    'name': row[1],
+                    'protocol': row[2],
+                    'ip': row[3],
+                    'type': row[4],
+                    'username': row[5],
+                    'password': row[6],
+                    'status': row[7],
+                    'rtsp_url': row[8],
+                    'vendor': row[9],
+                    'stream_path': row[10],
+                    'created_at': row[11].isoformat() if row[11] else None
+                }
+            return None
+                
+        except Exception as e:
+            logging.error(f"Error getting device: {str(e)}", exc_info=True)
+            raise

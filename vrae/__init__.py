@@ -3,12 +3,17 @@ from quart_cors import cors
 from quart_auth import QuartAuth
 import logging
 import os
+import weakref
+from aiortc import RTCPeerConnection
 from logging.handlers import RotatingFileHandler
 from .config import Config
-from .init_db import init_db
+from .db import Database
 
 # Initialize Quart app
 app = Quart(__name__)
+
+# Initialize WebRTC peer connection pool
+app.pc_pool = weakref.WeakSet()
 
 # Configure CORS with expanded settings
 app = cors(app, 
@@ -34,28 +39,33 @@ app.config.update(
 auth = QuartAuth(app)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-
-os.makedirs('logs', exist_ok=True)
-log_handler = RotatingFileHandler(
-    'logs/api.log', 
-    mode='a', 
-    maxBytes=5 * 1024 * 1024, 
-    backupCount=2
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        RotatingFileHandler(
+            'logs/api.log',
+            maxBytes=10000000,
+            backupCount=5
+        ),
+        logging.StreamHandler()
+    ]
 )
-log_handler.setFormatter(log_formatter)
-log_handler.setLevel(logging.DEBUG)
-
-app.logger.addHandler(log_handler)
-root_logger = logging.getLogger()
-root_logger.addHandler(log_handler)
-root_logger.setLevel(logging.DEBUG)
 
 # Initialize database
 @app.before_serving
-async def startup():
-    await init_db(app)
+async def init_db():
+    try:
+        await Database.get_pool()
+        logging.info("Database connection initialized")
+    except Exception as e:
+        logging.error(f"Failed to initialize database: {str(e)}")
+        raise
+
+@app.after_serving
+async def cleanup():
+    await Database.close_pool()
+    logging.info("Database connection closed")
 
 # Import routes after app initialization
 from . import routes

@@ -21,46 +21,32 @@ stream_manager = StreamManager()
 def token_required(f):
     @wraps(f)
     async def decorated(*args, **kwargs):
-        app.logger.debug("Entering token_required decorator")
-        token = None
-
-        # Check Authorization header
-        auth_header = request.headers.get('Authorization')
-        if (auth_header):
-            if ('Bearer ' in auth_header):
-                token = auth_header.split(" ")[1]
-            else:
-                token = auth_header
-
-        # Check URL parameters if no header token
-        if (not token and request.args.get('token')):
-            token = request.args.get('token')
-
-        if (not token):
-            app.logger.warning("Token is missing")
-            return jsonify({'message': 'Token não fornecido'}), 401
-
         try:
-            app.logger.debug(f"Decoding token: {token}")
+            logging.debug("Entering token_required decorator")
+            token = request.headers.get('Authorization')
+            
+            if not token:
+                logging.error("No token provided")
+                return jsonify({'message': 'Token is missing!'}), 401
+
+            # Remove 'Bearer ' if present
+            if token.startswith('Bearer '):
+                token = token.split(' ')[1]
+            
+            logging.debug(f"Decoding token: {token}")
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-            current_user = await User.get(data['id'])
             
-            if (not current_user):
-                app.logger.warning(f"User not found for ID: {data['id']}")
-                return jsonify({'message': 'Usuário não encontrado'}), 401
-                
-            return await f(current_user, *args, **kwargs)
+            # Add user data to kwargs instead of positional args
+            kwargs['user_data'] = data
+            return await f(*args, **kwargs)
             
-        except jwt.ExpiredSignatureError:
-            app.logger.warning("Token expired")
-            return jsonify({'message': 'Token expirado'}), 401
-        except jwt.InvalidTokenError:
-            app.logger.warning("Invalid token")
+        except jwt.InvalidTokenError as e:
+            logging.error(f"Token validation error: {str(e)}")
             return jsonify({'message': 'Token inválido'}), 401
         except Exception as e:
-            app.logger.error(f"Token validation error: {str(e)}")
-            return jsonify({'message': 'Erro na validação do token'}), 401
-
+            logging.error(f"Unexpected error in token validation: {str(e)}", exc_info=True)
+            return jsonify({'message': 'Erro na validação do token'}), 500
+    
     return decorated
 
 
@@ -169,33 +155,36 @@ pcs = set()
 
 @app.route('/offer', methods=['POST'])
 @token_required
-async def offer(current_user):
+async def offer(user_data):
+    pc = None
+    video = None
     try:
-        params = await request.get_json()
-        offer = RTCSessionDescription(
-            sdp=params["sdp"],
-            type=params["type"]
-        )
+        data = await request.get_json()
+        device_id = data.get('device_id')
+        if not device_id:
+            return jsonify({"error": "No device_id provided"}), 400
 
-        # Use rtc_configuration ao invés de RTCConfiguration
+        logging.info(f"Creating WebRTC connection for device {device_id}")
+        
+        video = VideoStreamTrack(device_id=device_id)
+        await video.connect_to_camera()
+
         pc = RTCPeerConnection(configuration=rtc_configuration)
-        pcs.add(pc)
-
-        try:
-            # Tente primeiro a câmera 1 (que funcionou no teste)
-            video = VideoStreamTrack(camera_id=1)
-        except Exception as e:
-            app.logger.warning(f"Failed to open camera 1: {str(e)}")
-            try:
-                # Fallback para câmera 0
-                video = VideoStreamTrack(camera_id=0)
-            except Exception as e:
-                app.logger.error(f"Failed to open any camera: {str(e)}")
-                return jsonify({"error": "Could not initialize camera"}), 500
-
         pc.addTrack(video)
+        app.pc_pool.add(pc)
 
+        @pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            logging.info(f"Connection state: {pc.connectionState}")
+            if pc.connectionState in ["failed", "closed"]:
+                if video:
+                    video.stop()
+                if pc in app.pc_pool:
+                    app.pc_pool.discard(pc)
+
+        offer = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
         await pc.setRemoteDescription(offer)
+        
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
@@ -205,78 +194,52 @@ async def offer(current_user):
         })
 
     except Exception as e:
-        app.logger.error(f"Error in WebRTC connection: {str(e)}")
+        logging.error(f"Error in offer route: {str(e)}", exc_info=True)
+        if video:
+            video.stop()
+        if pc:
+            await pc.close()
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/devices', methods=['GET'])
 @token_required
-async def list_devices(current_user):
-    """List all devices"""
+async def list_devices(user_data):  # Added user_data parameter
     try:
-        devices = await Device.get_devices()
-        return jsonify([{
-            'id': d.id,
-            'name': d.name,
-            'protocol': d.protocol,
-            'ip': d.ip,
-            'model': d.model,
-            'username': d.username,
-            'created_at': str(d.created_at)
-        } for d in devices])
+        devices = await Device.get_devices(user_id=user_data['id'])  # Pass user_id to get_devices
+        return jsonify(devices)
     except Exception as e:
-        app.logger.error(f"Error listing devices: {e}")
-        return jsonify({'message': 'Erro ao listar dispositivos'}), 500
+        logging.error(f"Error listing devices: {str(e)}")
+        return jsonify({'message': 'Error listing devices'}), 500
 
 @app.route('/devices', methods=['POST'])
 @token_required
-async def add_device(current_user):
-    """Add a new device"""
+async def add_device(user_data):  # Now accepts user_data from token_required
     try:
         data = await request.get_json()
+        logging.debug(f"Received device data: {data}")
         
-        # Validate required fields
-        required_fields = ['name', 'protocol', 'ip']
-        for field in required_fields:
-            if not data.get(field):
-                return jsonify({'message': f'Campo {field} é obrigatório'}), 400
-
-        # Validate protocol
-        valid_protocols = ['RTSP', 'HTTP', 'ONVIF']
-        if data['protocol'] not in valid_protocols:
-            return jsonify({'message': 'Protocolo inválido'}), 400
-
-        # Test camera connection and get model
-        success, model = await CameraManager.test_connection(
-            protocol=data['protocol'],
-            ip=data['ip'],
-            username=data.get('username'),
-            password=data.get('password')
-        )
-
-        if not success:
-            return jsonify({'message': 'Não foi possível conectar ao dispositivo'}), 400
-
-        # Add device with model information
-        result = await Device.add_device(
-            name=data['name'],
-            protocol=data['protocol'],
-            ip=data['ip'],
-            username=data.get('username'),
-            password=data.get('password'),
-            model=model
-        )
-
-        if result:
-            return jsonify({
-                'message': 'Dispositivo adicionado com sucesso',
-                'model': model
-            }), 201
-        return jsonify({'message': 'Erro ao adicionar dispositivo'}), 500
-
+        # Initialize camera manager and test connection
+        camera_manager = CameraManager()
+        connection_success = await camera_manager.connect_camera(data)
+        
+        if not connection_success:
+            return jsonify({'message': 'Failed to connect to camera'}), 400
+        
+        # Add user_id from token to device data
+        data['user_id'] = user_data.get('id')
+        
+        # Add device to database
+        logging.info("Adding device to database")
+        result = await Device.add_device(data)
+        
+        return jsonify({
+            'message': 'Device added successfully',
+            'device_id': result.get('device_id')
+        }), 201
+            
     except Exception as e:
-        app.logger.error(f"Error adding device: {e}")
-        return jsonify({'message': f'Erro ao adicionar dispositivo: {str(e)}'}), 500
+        logging.error(f"Error in add_device: {str(e)}", exc_info=True)
+        return jsonify({'message': str(e)}), 500
 
 
 @app.after_request

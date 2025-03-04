@@ -1,9 +1,13 @@
 import asyncio
-from vrae import app
-from vrae.init_db import init_db
+import logging
+from vrae.db import Database
 
 async def main():
-    await init_db(app)
+    logging.basicConfig(level=logging.INFO)
+    try:
+        await Database.init_db()
+    finally:
+        await Database.close_pool()
 
 if __name__ == "__main__":
     asyncio.run(main())

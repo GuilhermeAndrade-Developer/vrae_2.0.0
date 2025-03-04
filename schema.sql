@@ -1,13 +1,19 @@
 CREATE TABLE IF NOT EXISTS devices (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    protocol ENUM('RTSP', 'HTTP', 'ONVIF') NOT NULL,
-    ip VARCHAR(255) NOT NULL,
-    model VARCHAR(255),
+    protocol VARCHAR(50) NOT NULL,
+    ip VARCHAR(50) NOT NULL,
     username VARCHAR(255),
     password VARCHAR(255),
+    type VARCHAR(50) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    rtsp_url TEXT,
+    vendor VARCHAR(100),
+    stream_path TEXT,
+    user_id INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_device (name, ip)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS users (

@@ -123,12 +123,39 @@ async function startStreaming(deviceValue) {
     const messages = document.getElementById('messages');
     messages.textContent = "Iniciando conexão...";
 
+    const configuration = {
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        // Configurações de mídia otimizadas
+        sdpSemantics: 'unified-plan',
+        rtcpMuxPolicy: 'require',
+        bundlePolicy: 'max-bundle',
+        // Configurações de qualidade
+        encodings: [{
+            maxBitrate: 8000000, // 8 Mbps
+            maxFramerate: 30,
+            scaleResolutionDownBy: 1.0, // Sem downscaling
+            networkPriority: 'high'
+        }],
+        // Configurações de codec
+        offerOptions: {
+            offerToReceiveVideo: true,
+            offerToReceiveAudio: false,
+            voiceActivityDetection: false,
+            iceRestart: false
+        }
+    };
+
+    // Parâmetros de vídeo
+    const videoConstraints = {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 30, min: 25 },
+        aspectRatio: 16/9,
+        resizeMode: 'crop-and-scale'
+    };
+
     try {
-        pc = new RTCPeerConnection({
-            iceServers: [
-                { urls: "stun:stun.l.google.com:19302" }
-            ]
-        });
+        pc = new RTCPeerConnection(configuration);
 
         pc.ontrack = (event) => {
             if (event.track.kind === 'video') {
@@ -139,9 +166,7 @@ async function startStreaming(deviceValue) {
         };
 
         // Create offer
-        const offer = await pc.createOffer({
-            offerToReceiveVideo: true
-        });
+        const offer = await pc.createOffer(configuration.offerOptions);
         await pc.setLocalDescription(offer);
 
         // Send offer to server with device_id
